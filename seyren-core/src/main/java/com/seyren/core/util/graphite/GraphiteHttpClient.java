@@ -68,7 +68,6 @@ public class GraphiteHttpClient {
     
     private static final Logger LOGGER = LoggerFactory.getLogger(GraphiteHttpClient.class);
     private static final String THRESHOLD_TARGET = "alias(dashed(color(constantLine(%s),\"%s\")),\"%s\")";
-    private static final int MAX_CONNECTIONS_PER_ROUTE = 20;
     
     private final JsonNodeResponseHandler jsonNodeHandler = new JsonNodeResponseHandler();
     private final ByteArrayResponseHandler chartBytesHandler = new ByteArrayResponseHandler();
@@ -83,6 +82,8 @@ public class GraphiteHttpClient {
     private final int graphiteConnectionRequestTimeout;
     private final int graphiteConnectTimeout;
     private final int graphiteSocketTimeout;
+    private final int graphiteMaxConnPerRoute;
+    private final int graphiteMaxConnTotal;
     private final HttpClient client;
     private final HttpContext context;
     
@@ -99,6 +100,8 @@ public class GraphiteHttpClient {
         this.graphiteConnectionRequestTimeout = seyrenConfig.getGraphiteConnectionRequestTimeout();
         this.graphiteConnectTimeout = seyrenConfig.getGraphiteConnectTimeout();
         this.graphiteSocketTimeout = seyrenConfig.getGraphiteSocketTimeout();
+        this.graphiteMaxConnPerRoute = seyrenConfig.getGraphiteMaxConnPerRoute();
+        this.graphiteMaxConnTotal = seyrenConfig.getGraphiteMaxConnTotal();
         this.context = new BasicHttpContext();
         this.client = createHttpClient();
     }
@@ -152,6 +155,9 @@ public class GraphiteHttpClient {
                 .addParameter("width", String.valueOf(width))
                 .addParameter("height", String.valueOf(height))
                 .addParameter("uniq", String.valueOf(new DateTime().getMillis()))
+                .addParameter("fgcolor", "white")
+                .addParameter("bgcolor", "black")
+                .addParameter("colorList", "blue,green,red,purple,brown,yellow,aqua,grey,magenta,pink,gold,rose")
                 .addParameter("hideLegend", legendState == LegendState.HIDE ? "true" : "false")
                 .addParameter("hideAxes", axesState == AxesState.HIDE ? "true" : "false");
         
@@ -249,7 +255,8 @@ public class GraphiteHttpClient {
             manager = new PoolingHttpClientConnectionManager();
         }
         
-        manager.setDefaultMaxPerRoute(MAX_CONNECTIONS_PER_ROUTE);
+        manager.setDefaultMaxPerRoute(graphiteMaxConnPerRoute);
+        manager.setMaxTotal(graphiteMaxConnTotal);
         return manager;
     }
     

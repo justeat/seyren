@@ -18,6 +18,7 @@ import static com.google.common.collect.Iterables.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Pattern;
 
 import javax.inject.Inject;
 import javax.inject.Named;
@@ -83,9 +84,10 @@ public class SlackNotificationService implements NotificationService {
         List<BasicNameValuePair> parameters = new ArrayList<BasicNameValuePair>();
         parameters.add(new BasicNameValuePair("token", token));
         parameters.add(new BasicNameValuePair("channel", StringUtils.removeEnd(channel, "!")));
-        parameters.add(new BasicNameValuePair("text", formatContent(emojis, check, subscription, alerts)));
-        parameters.add(new BasicNameValuePair("username", username));
+        parameters.add(new BasicNameValuePair("text", check.getState().toString()));
+        parameters.add(new BasicNameValuePair("username", check.getName()));
         parameters.add(new BasicNameValuePair("icon_url", iconUrl));
+        parameters.add(new BasicNameValuePair("attachments", formatAttachment(check, alerts)));
 
         try {
             post.setEntity(new UrlEncodedFormEntity(parameters));
@@ -111,6 +113,86 @@ public class SlackNotificationService implements NotificationService {
         return subscriptionType == SubscriptionType.SLACK;
     }
 
+    private String formatAttachment(Check check, List<Alert> alerts){
+        String name = check.getName();
+        String state = check.getState().toString();
+        String url = String.format("%s/#/checks/%s", seyrenConfig.getBaseUrl(), check.getId());
+        String color;
+        String actions = "";
+        String dashUrl = "";
+        String dashText = "";
+        String runText = "";
+        String runUrl = "";
+        String titletext = String.format("Check <%s|*%s*> has entered its %s state.", url, name, state);
+        String message = " ";
+        if (!state.equals("OK")) {
+            message = String.format("%s", check.getDescription()
+                .replaceAll("<br/><br/>Last synced by iWatchman.*$","")
+                .replaceAll("<br/><br/>Created by iWatchman.*$","")
+                .replaceAll("<br/>","\n")
+                .replaceAll("<b>","*")
+                .replaceAll("</b>","*")
+                .replaceAll("<.*>","")
+                .replaceAll("Please fully define the feature '.*' in Platform Metadata.","")
+                .replaceAll("Please fully define the feature '.*' in .",""));
+        }
+
+        if (message.contains("http://grafana.je-labs.com")){
+            String[] parts = message.split("\\s+");
+            for (String part: parts){
+                if (part.contains("http://grafana.je-labs.com")){
+                    dashUrl = part;
+                }
+            }
+            message = message.replace(dashUrl, "");
+            message = message.replace("Dashboard:", "");
+            message = message.replace("Dashboards:", "");
+        }
+
+        if (message.toLowerCase().contains("runbook.md")) {
+            String[] parts = message.split("\\s+");
+            for (String part: parts){
+                if (part.toLowerCase().contains("runbook.md")){
+                    runUrl = part;
+                }
+            }
+            message = message.replace(runUrl, "");
+            message = message.replace("Runbook:", "");           
+        }
+
+        if (!dashUrl.isEmpty()){
+            dashText = String.format("{\"type\": \"button\", \"text\": \"Dashboard :chart_with_downwards_trend:\", \"url\": \"%s\" }", dashUrl);
+        }
+        if (!runUrl.isEmpty()){
+            runText = String.format("{\"type\": \"button\", \"text\": \"Runbook :book:\", \"url\": \"%s\" }", runUrl);
+        }
+        if (!dashText.isEmpty() || !runText.isEmpty()){
+            actions = String.format("\"actions\": [ %s, %s ]", dashText, runText);
+        }
+
+        String text = String.format("\"text\":\"%s\"", message);
+        //Slack colors can be good, warning, danger
+        //Seyren gives us OK, WARN, ERROR
+        //I'd use switch but it's only good for Java 1.7 and above
+
+        if (state.equals("OK")) {
+            color = "\"color\": \"good\"";
+        } else if (state.equals("WARN")) {
+            color = "\"color\": \"warning\"";
+        } else if (state.equals("ERROR")) {
+            color = "\"color\": \"danger\"";
+        } else {
+            color = "\"color\": \"#000088\"";
+        }
+
+        String fallback = String.format("\"fallback\":\"%s\"", titletext);
+        String title = String.format("\"title\":\"%s\"", titletext);
+        String attachment = String.format("[{%s, %s, %s, %s, %s}]", fallback, text, color, title, actions );
+        return attachment;
+    }
+
+
+    //If all of the info is to be in the attachment the below function is redundant
     private String formatContent(List<String> emojis, Check check, Subscription subscription, List<Alert> alerts) {
         String url = String.format("%s/#/checks/%s", seyrenConfig.getBaseUrl(), check.getId());
         String alertsString = Joiner.on("\n").join(transform(alerts, new Function<Alert, String>() {
@@ -123,22 +205,20 @@ public class SlackNotificationService implements NotificationService {
         String channel = subscription.getTarget().contains("!") ? "<!channel>" : "";
 
         String description;
-        if (StringUtils.isNotBlank(check.getDescription())) {
-            description = String.format("\n> %s", check.getDescription());
+        if (StringUtils.isNotBlank(check.getDescription()) && check.getState().ordinal() != 1) {
+            description = String.format("\n>%s", check.getDescription().replaceAll("<br/><br/>Last synced by iWatchman.*$","").replaceAll("<br/><br/>Created by iWatchman.*$","").replaceAll("<br/>","\n").replaceAll("\n",">\n").replaceAll("<b>","*").replaceAll("</b>","*"));
         } else {
             description = "";
         }
 
         final String state = check.getState().toString();
 
-        return String.format("%s*%s* %s [%s]%s\n```\n%s\n```\n#%s %s",
+        return String.format("%s Check <%s|*%s*> has entered its %s state %s %s",
                 Iterables.get(emojis, check.getState().ordinal(), ""),
-                state,
-                check.getName(),
                 url,
-                description,
-                alertsString,
-                state.toLowerCase(Locale.getDefault()),
+                check.getName(),
+		state,
+		description,
                 channel
         );
     }
